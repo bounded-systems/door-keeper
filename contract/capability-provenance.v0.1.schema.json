@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/bounded-systems/ocap-provenance/predicate/CapabilityProvenance/v0.1",
+  "title": "CapabilityProvenance predicate (v0.1)",
+  "description": "Capability-aware provenance: SLSA-style build/run lineage PLUS the OCAP capability surface the producing actor held. Carried as the `predicate` of an in-toto Statement v1; the Statement's `subject` is the attested artifact (image digest / launch id / git object sha).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["level", "producer"],
+  "properties": {
+    "level": {
+      "description": "Which link in the chain this attests (see CHAIN.md).",
+      "enum": ["image", "launch", "write"]
+    },
+    "producer": {
+      "description": "Who/what produced the subject.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "enum": ["nix-flake", "keeperd"] },
+        "id": {
+          "type": "string",
+          "description": "Stable identity URI: a flake rev (L1) or the keeperd instance id (L2/L3)."
+        }
+      }
+    },
+    "image": {
+      "description": "The box image in play (present at every level so launch/write tie back to a known image).",
+      "$ref": "#/$defs/resourceDigest"
+    },
+    "capabilities": {
+      "description": "The OCAP surface the actor held. Empty at level=image (a built image holds no granted doors); the actual launch manifest at level=launch; the same manifestDigest re-bound at level=write.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workcell": { "type": "string", "examples": ["claude-box"] },
+        "manifestDigest": {
+          "description": "sha256 of the $CLAUDE_BOX_CAPABILITIES JSON — the binding value carried L2 -> L3.",
+          "$ref": "#/$defs/digestSet"
+        },
+        "doors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "name": { "type": "string" },
+              "socket": { "type": "string", "description": "in-box path, e.g. /run/keeperd.sock" },
+              "env": { "type": "string", "description": "exported env var, e.g. KEEPERD_SOCK" },
+              "grants": { "type": "string", "description": "one-line capability" }
+            }
+          }
+        },
+        "denied": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": { "name": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "materials": {
+      "description": "Inputs that determined the subject (L1: flake.lock inputs).",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["uri"],
+        "properties": {
+          "uri": { "type": "string" },
+          "digest": { "$ref": "#/$defs/digestSet" }
+        }
+      }
+    },
+    "links": {
+      "description": "Back-references up the chain (L2 -> L1 image; L3 -> L2 launch).",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["level", "digest"],
+        "properties": {
+          "level": { "enum": ["image", "launch", "write"] },
+          "digest": { "$ref": "#/$defs/digestSet" }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "invocationId": { "type": "string" },
+        "startedOn": { "type": "string", "format": "date-time" },
+        "finishedOn": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "$defs": {
+    "digestSet": {
+      "type": "object",
+      "description": "Algorithm -> lowercase hex digest (in-toto DigestSet).",
+      "additionalProperties": { "type": "string" },
+      "properties": { "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+    },
+    "resourceDigest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["digest"],
+      "properties": {
+        "name": { "type": "string" },
+        "digest": { "$ref": "#/$defs/digestSet" }
+      }
+    }
+  }
+}
