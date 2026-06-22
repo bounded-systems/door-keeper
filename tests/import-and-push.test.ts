@@ -36,7 +36,8 @@ describe("import-and-push (model A)", () => {
     await gitExec(host, ["commit", "-m", "base"]);
     await gitExec(host, ["push", "origin", "main"]);
 
-    // keeperd's repo clone (has the parent).
+    // keeperd's repo clone (has the parent). No git identity is configured here —
+    // the daemon passes its own committer identity for `git notes add`.
     keeperRepo = join(root, "keeperd");
     await gitExec(root, ["clone", remote, keeperRepo]);
   });
@@ -108,5 +109,40 @@ describe("import-and-push (model A)", () => {
     );
     expect(resp.ok).toBe(false);
     expect(resp.error?.code).toBe("TIP_MISMATCH");
+  });
+
+  test("notesRef: attaches the signed L3 as a git note and pushes the notes ref", async () => {
+    // Host builds a fresh commit + bundle on a new branch.
+    const nb = "GH-NOTE";
+    await gitExec(host, ["checkout", "main"]);
+    await gitExec(host, ["checkout", "-b", nb]);
+    writeFileSync(join(host, "c.txt"), "noted\n");
+    await gitExec(host, ["add", "-A"]);
+    await gitExec(host, ["commit", "-m", "noted"]);
+    const sha = (await gitExec(host, ["rev-parse", nb])).stdout.trim();
+    const notePath = join(root, "note.bundle");
+    await gitExec(host, ["bundle", "create", notePath, `main..${nb}`]);
+    const bundleBase64 = readFileSync(notePath).toString("base64");
+
+    const resp = await handleRequest(
+      JSON.stringify({
+        id: "3",
+        method: "import-and-push",
+        params: { repo: keeperRepo, bundleBase64, commitSha: sha, branch: nb, remote: "origin", notesRef: "provenance" },
+      }),
+    );
+    expect(resp.ok).toBe(true);
+    const result = resp.result as { note?: { ref: string; written: boolean; pushed: boolean } };
+    expect(result.note).toEqual({ ref: "refs/notes/provenance", written: true, pushed: true });
+
+    // The note is readable on the commit and carries the verifiable L3.
+    const show = await gitExec(keeperRepo, ["notes", "--ref=provenance", "show", sha]);
+    expect(show.ok).toBe(true);
+    const l3 = JSON.parse(show.stdout) as L3Attestation;
+    expect(verifySignature(canonicalJson(l3.statement), l3.signature)).toBe(true);
+
+    // The remote received refs/notes/provenance.
+    const ls = await gitExec(root, ["ls-remote", remote, "refs/notes/provenance"]);
+    expect(ls.stdout).toContain("refs/notes/provenance");
   });
 });
