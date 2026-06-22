@@ -11,7 +11,8 @@
  *   keeperd serve --key /path/to/key  # signing key (Ed25519)
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, resolve, join } from "node:path";
 import { createHash, sign, verify, generateKeyPairSync, createPrivateKey, createPublicKey } from "node:crypto";
 import type { Socket } from "bun";
@@ -419,10 +420,77 @@ async function handleGetPublicKey(_params: Record<string, unknown>): Promise<unk
   };
 }
 
+/**
+ * Model-A keeper write: the host already did the keyless commit and ships the new
+ * commits as a commit-range bundle; keeperd imports them, verifies the tip is
+ * EXACTLY the host-materialized commit (fail closed), then performs the signed
+ * push and returns an L3 attestation over the pushed commit. The host never
+ * grants keeperd commit authorship — only import + push.
+ */
+async function handleImportAndPush(params: Record<string, unknown>): Promise<unknown> {
+  const repo = params.repo as string;
+  const bundleBase64 = params.bundleBase64 as string;
+  const commitSha = params.commitSha as string;
+  const branch = params.branch as string;
+  const remote = (params.remote as string | undefined) ?? "origin";
+  const pushArgs = (params.pushArgs as string[] | undefined) ?? [];
+  const manifestDigest = (params.manifestDigest as string | undefined) ?? "";
+
+  if (!repo || !bundleBase64 || !commitSha || !branch) {
+    throw { code: "INVALID_PARAMS", message: "repo, bundleBase64, commitSha, branch required" };
+  }
+  if (!/^[0-9a-f]{40}$/.test(commitSha)) {
+    throw { code: "INVALID_PARAMS", message: "commitSha must be a 40-hex sha" };
+  }
+  if (!existsSync(repo)) {
+    throw { code: "REPO_NOT_FOUND", message: `repository not found: ${repo}` };
+  }
+
+  const bundlePath = join(tmpdir(), `keeperd-import-${commitSha.slice(0, 12)}-${Date.now()}.bundle`);
+  writeFileSync(bundlePath, Buffer.from(bundleBase64, "base64"));
+  try {
+    // 1. Import the host-built commit-range bundle.
+    const fetchResult = await gitExec(repo, [
+      "fetch",
+      bundlePath,
+      `+refs/heads/${branch}:refs/heads/${branch}`,
+    ]);
+    if (!fetchResult.ok) {
+      throw { code: "BAD_BUNDLE", message: fetchResult.stderr };
+    }
+    // 2. Fail closed: the imported tip MUST equal the host-materialized commit,
+    //    so a corrupt/wrong bundle can never be pushed.
+    const tipResult = await gitExec(repo, ["rev-parse", branch]);
+    const tip = tipResult.stdout.trim();
+    if (!tipResult.ok || tip !== commitSha) {
+      throw { code: "TIP_MISMATCH", message: `imported tip ${tip} != requested ${commitSha}` };
+    }
+    // 3. Signed push — keeperd holds the push credential; the host does not.
+    const pushResult = await gitExec(repo, ["push", remote, `${branch}:${branch}`, ...pushArgs]);
+    if (!pushResult.ok) {
+      throw { code: "GIT_PUSH_FAILED", message: pushResult.stderr, exitCode: pushResult.code };
+    }
+  } finally {
+    rmSync(bundlePath, { force: true });
+  }
+
+  // 4. L3 attestation over the pushed commit (the signed verdict consumers verify).
+  const attestation = signingKey
+    ? buildL3Attestation(commitSha, repo, `refs/heads/${branch}`, manifestDigest)
+    : undefined;
+  return {
+    status: "ok",
+    commitSha,
+    pushedRef: `refs/heads/${branch}`,
+    signedDerivation: attestation,
+  };
+}
+
 const METHODS: Record<string, MethodHandler> = {
   status: handleStatus,
   commit: handleCommit,
   push: handlePush,
+  "import-and-push": handleImportAndPush,
   sign: handleSign,
   verify: handleVerify,
   getPublicKey: handleGetPublicKey,
