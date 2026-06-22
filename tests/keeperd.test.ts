@@ -16,6 +16,7 @@ import {
   verifySignature,
   sha256,
   buildL3Attestation,
+  canonicalJson,
   gitExec,
   VERSION,
 } from "../keeperd";
@@ -242,14 +243,14 @@ describe("keeperd", () => {
 
     test("signature is valid", () => {
       const attestation = buildL3Attestation(commitSha, repo, ref, manifestDigest);
-      const stmtJson = JSON.stringify(attestation.statement);
+      const stmtJson = canonicalJson(attestation.statement);
 
       expect(verifySignature(stmtJson, attestation.signature)).toBe(true);
     });
 
     test("statementDigest matches statement", () => {
       const attestation = buildL3Attestation(commitSha, repo, ref, manifestDigest);
-      const expectedDigest = sha256(JSON.stringify(attestation.statement));
+      const expectedDigest = sha256(canonicalJson(attestation.statement));
 
       expect(attestation.statementDigest).toBe(expectedDigest);
     });

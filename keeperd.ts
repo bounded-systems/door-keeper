@@ -59,6 +59,23 @@ function sha256(data: string): string {
   return createHash("sha256").update(data).digest("hex");
 }
 
+/**
+ * Canonical JSON for signing: recursively sort object keys, no whitespace — so a
+ * statement's signature is independent of key insertion order (a verifier that
+ * reconstructs the object in a different order still verifies). Signer and
+ * verifier MUST use the identical algorithm (prx mirrors this in `verify-l3.ts`).
+ */
+export function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const obj = value as Record<string, unknown>;
+  const body = Object.keys(obj)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`)
+    .join(",");
+  return `{${body}}`;
+}
+
 type SigningKey = {
   privateKey: ReturnType<typeof createPrivateKey>;
   publicKeyPem: string;
@@ -172,7 +189,7 @@ function buildL3Attestation(
   (stmt.predicate.buildDefinition.externalParameters as Record<string, unknown>).ref = ref;
 
   // Canonicalize and sign
-  const stmtJson = JSON.stringify(stmt);
+  const stmtJson = canonicalJson(stmt);
   const stmtDigest = sha256(stmtJson);
   const signature = signData(stmtJson);
 
