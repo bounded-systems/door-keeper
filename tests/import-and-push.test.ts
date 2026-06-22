@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { handleRequest, loadOrCreateKey, verifySignature, gitExec } from "../keeperd";
+import { handleRequest, loadOrCreateKey, verifySignature, gitExec, canonicalJson } from "../keeperd";
 import type { L3Attestation } from "../keeperd";
 
 const HEX40 = /^[0-9a-f]{40}$/;
@@ -84,7 +84,7 @@ describe("import-and-push (model A)", () => {
     // L3 attestation present, subject is the commit, signature verifies.
     expect(result.signedDerivation).toBeDefined();
     const att = result.signedDerivation!;
-    expect(verifySignature(JSON.stringify(att.statement), att.signature)).toBe(true);
+    expect(verifySignature(canonicalJson(att.statement), att.signature)).toBe(true);
 
     // The remote actually received the branch at the host commit.
     const ls = await gitExec(root, ["ls-remote", remote, `refs/heads/${branch}`]);
