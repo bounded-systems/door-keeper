@@ -60,20 +60,24 @@ function sha256(data: string): string {
 }
 
 /**
- * Canonical JSON for signing: recursively sort object keys, no whitespace — so a
- * statement's signature is independent of key insertion order (a verifier that
- * reconstructs the object in a different order still verifies). Signer and
- * verifier MUST use the identical algorithm (prx mirrors this in `verify-l3.ts`).
+ * Canonical JSON for signing: recursively sort object keys, then `JSON.stringify`
+ * — so the signature is independent of key insertion order AND stable across a
+ * JSON round-trip (the L3 always crosses the wire / a git note before it is
+ * verified, and JSON drops `undefined`-valued keys; sorting then stringifying
+ * matches that exactly). Signer and verifier MUST use the identical algorithm
+ * (prx mirrors this in `verify-l3.ts`).
  */
-export function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+function sortDeep(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(sortDeep);
   const obj = value as Record<string, unknown>;
-  const body = Object.keys(obj)
-    .sort()
-    .map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`)
-    .join(",");
-  return `{${body}}`;
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(obj).sort()) out[k] = sortDeep(obj[k]);
+  return out;
+}
+
+export function canonicalJson(value: unknown): string {
+  return JSON.stringify(sortDeep(value));
 }
 
 type SigningKey = {
@@ -452,6 +456,10 @@ async function handleImportAndPush(params: Record<string, unknown>): Promise<unk
   const remote = (params.remote as string | undefined) ?? "origin";
   const pushArgs = (params.pushArgs as string[] | undefined) ?? [];
   const manifestDigest = (params.manifestDigest as string | undefined) ?? "";
+  // Opt-in: project the signed L3 onto the commit as a git note under
+  // refs/notes/<notesRef> (e.g. "provenance") so it travels with the repo and is
+  // queryable via `git notes show` / `git log --show-notes` / blame → commit → note.
+  const notesRef = params.notesRef as string | undefined;
 
   if (!repo || !bundleBase64 || !commitSha || !branch) {
     throw { code: "INVALID_PARAMS", message: "repo, bundleBase64, commitSha, branch required" };
@@ -495,11 +503,26 @@ async function handleImportAndPush(params: Record<string, unknown>): Promise<unk
   const attestation = signingKey
     ? buildL3Attestation(commitSha, repo, `refs/heads/${branch}`, manifestDigest)
     : undefined;
+
+  // 5. Opt-in provenance note: attach the signed L3 to the commit as a git note
+  //    and push the notes ref. Best-effort — the branch (the critical effect) is
+  //    already pushed, so a note failure never unwinds it; the verdict reports it.
+  let note: { ref: string; written: boolean; pushed: boolean } | undefined;
+  if (attestation && notesRef) {
+    const noteJson = JSON.stringify(attestation);
+    const add = await gitExec(repo, ["notes", `--ref=${notesRef}`, "add", "-f", "-m", noteJson, commitSha]);
+    const push = add.ok
+      ? await gitExec(repo, ["push", remote, `refs/notes/${notesRef}`])
+      : null;
+    note = { ref: `refs/notes/${notesRef}`, written: add.ok, pushed: push?.ok ?? false };
+  }
+
   return {
     status: "ok",
     commitSha,
     pushedRef: `refs/heads/${branch}`,
     signedDerivation: attestation,
+    ...(note ? { note } : {}),
   };
 }
 
