@@ -36,7 +36,8 @@ describe("import-and-push (model A)", () => {
     await gitExec(host, ["commit", "-m", "base"]);
     await gitExec(host, ["push", "origin", "main"]);
 
-    // keeperd's repo clone (has the parent).
+    // keeperd's repo clone (has the parent). No git identity is configured here —
+    // the daemon passes its own committer identity for `git notes add`.
     keeperRepo = join(root, "keeperd");
     await gitExec(root, ["clone", remote, keeperRepo]);
   });

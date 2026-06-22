@@ -510,7 +510,21 @@ async function handleImportAndPush(params: Record<string, unknown>): Promise<unk
   let note: { ref: string; written: boolean; pushed: boolean } | undefined;
   if (attestation && notesRef) {
     const noteJson = JSON.stringify(attestation);
-    const add = await gitExec(repo, ["notes", `--ref=${notesRef}`, "add", "-f", "-m", noteJson, commitSha]);
+    // `git notes add` writes a commit on the notes ref → needs a committer
+    // identity; pass it via -c so it works regardless of repo/global git config.
+    const add = await gitExec(repo, [
+      "-c",
+      "user.email=keeperd@bounded.systems",
+      "-c",
+      "user.name=keeperd",
+      "notes",
+      `--ref=${notesRef}`,
+      "add",
+      "-f",
+      "-m",
+      noteJson,
+      commitSha,
+    ]);
     const push = add.ok
       ? await gitExec(repo, ["push", remote, `refs/notes/${notesRef}`])
       : null;
