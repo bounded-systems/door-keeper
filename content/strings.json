@@ -1,0 +1,10 @@
+{
+  "name": {
+    "type": "name",
+    "value": "Door Keeper"
+  },
+  "description": {
+    "type": "meta",
+    "value": "door-keeper is keeperd packaged as a standalone, pinned OCI image. keeperd holds the box's"
+  }
+}
