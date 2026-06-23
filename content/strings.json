@@ -5,6 +5,6 @@
   },
   "description": {
     "type": "meta",
-    "value": "door-keeper is keeperd packaged as a standalone, pinned OCI image. keeperd holds the box's"
+    "value": "door-keeper is keeperd packaged as a standalone, pinned OCI image.  keeperd holds the box's Ed25519 signing key and turns reviewed in-box edits into signed commits/refs — the box itself holds no keys and never writes the host's . git directly."
   }
 }
