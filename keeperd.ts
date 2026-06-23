@@ -88,6 +88,12 @@ type SigningKey = {
 
 let signingKey: SigningKey | null = null;
 
+// The content-address of the most recent L2 launch this daemon attested. One
+// daemon serves one launched pod, so a later import-and-push (the box's write)
+// auto-links it (unless the caller passes an explicit l2LaunchDigest) — closing
+// the capability chain without the box having to carry the digest.
+let lastLaunchDigest: string | undefined;
+
 function loadOrCreateKey(keyPath: string): SigningKey {
   const dir = dirname(keyPath);
   if (!existsSync(dir)) {
@@ -501,7 +507,8 @@ async function handleImportAndPush(params: Record<string, unknown>): Promise<unk
   const manifestDigest = (params.manifestDigest as string | undefined) ?? "";
   // Opt-in: the content-address of the box's L2 launch attestation, so the L3
   // write links back to its launch (capability chain: write → launch).
-  const l2LaunchDigest = params.l2LaunchDigest as string | undefined;
+  // Explicit param wins; else fall back to the launch this daemon attested.
+  const l2LaunchDigest = (params.l2LaunchDigest as string | undefined) ?? lastLaunchDigest;
   // Opt-in: project the signed L3 onto the commit as a git note under
   // refs/notes/<notesRef> (e.g. "provenance") so it travels with the repo and is
   // queryable via `git notes show` / `git log --show-notes` / blame → commit → note.
@@ -608,6 +615,8 @@ async function handleAttestLaunch(params: Record<string, unknown>): Promise<unkn
   const attestation = buildLaunchAttestation(subject, manifestDigest);
   // The content-address an L3 write links back to (links[].level="launch").
   const l2LaunchDigest = sha256(canonicalJson(attestation.statement));
+  // Remember it so a later import-and-push (the box's write) auto-links this launch.
+  lastLaunchDigest = l2LaunchDigest;
 
   return { status: "ok", subject, manifestDigest, l2LaunchDigest, attestation };
 }

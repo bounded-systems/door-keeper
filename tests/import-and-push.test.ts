@@ -193,4 +193,39 @@ describe("import-and-push (model A)", () => {
     const links = slsa.predicate.runDetails?.ocap_links ?? [];
     expect(links.some((l) => l.level === "launch" && l.digest.sha256 === l2.l2LaunchDigest)).toBe(true);
   });
+
+  test("auto-links the daemon's attested launch when no explicit l2LaunchDigest", async () => {
+    // The daemon attests the launch first → remembers its digest.
+    const launchResp = await handleRequest(
+      JSON.stringify({ id: "AL", method: "attest-launch", params: { subject: "box-auto", manifest: { doors: ["keeper"] } } }),
+    );
+    const l2 = launchResp.result as { l2LaunchDigest: string };
+
+    // A later import-and-push with NO explicit l2LaunchDigest auto-links it.
+    const ab = "GH-AUTO";
+    await gitExec(host, ["checkout", "main"]);
+    await gitExec(host, ["checkout", "-b", ab]);
+    writeFileSync(join(host, "e.txt"), "auto\n");
+    await gitExec(host, ["add", "-A"]);
+    await gitExec(host, ["commit", "-m", "auto"]);
+    const sha = (await gitExec(host, ["rev-parse", ab])).stdout.trim();
+    const bp = join(root, "auto.bundle");
+    await gitExec(host, ["bundle", "create", bp, `main..${ab}`]);
+    const bundleBase64 = readFileSync(bp).toString("base64");
+
+    const resp = await handleRequest(
+      JSON.stringify({
+        id: "AP",
+        method: "import-and-push",
+        params: { repo: keeperRepo, bundleBase64, commitSha: sha, branch: ab, remote: "origin" },
+      }),
+    );
+    expect(resp.ok).toBe(true);
+    const r = resp.result as { signedDerivation: L3Attestation };
+    const slsa = r.signedDerivation.statement as {
+      predicate: { runDetails?: { ocap_links?: Array<{ level: string; digest: { sha256?: string } }> } };
+    };
+    const links = slsa.predicate.runDetails?.ocap_links ?? [];
+    expect(links.some((l) => l.level === "launch" && l.digest.sha256 === l2.l2LaunchDigest)).toBe(true);
+  });
 });
