@@ -145,4 +145,52 @@ describe("import-and-push (model A)", () => {
     const ls = await gitExec(root, ["ls-remote", remote, "refs/notes/provenance"]);
     expect(ls.stdout).toContain("refs/notes/provenance");
   });
+
+  test("links the L2 launch attestation into the L3 (capability chain)", async () => {
+    // 1. The launch is attested first (a guest's signer door) → l2LaunchDigest.
+    const launchResp = await handleRequest(
+      JSON.stringify({
+        id: "L",
+        method: "attest-launch",
+        params: { subject: "box-1", manifest: { doors: ["keeper"] } },
+      }),
+    );
+    const l2 = launchResp.result as { l2LaunchDigest: string };
+
+    // 2. The box builds a commit; the keeper push links it back to the launch.
+    const cb = "GH-CHAIN";
+    await gitExec(host, ["checkout", "main"]);
+    await gitExec(host, ["checkout", "-b", cb]);
+    writeFileSync(join(host, "d.txt"), "chain\n");
+    await gitExec(host, ["add", "-A"]);
+    await gitExec(host, ["commit", "-m", "chain"]);
+    const sha = (await gitExec(host, ["rev-parse", cb])).stdout.trim();
+    const bp = join(root, "chain.bundle");
+    await gitExec(host, ["bundle", "create", bp, `main..${cb}`]);
+    const bundleBase64 = readFileSync(bp).toString("base64");
+
+    const resp = await handleRequest(
+      JSON.stringify({
+        id: "C",
+        method: "import-and-push",
+        params: {
+          repo: keeperRepo,
+          bundleBase64,
+          commitSha: sha,
+          branch: cb,
+          remote: "origin",
+          l2LaunchDigest: l2.l2LaunchDigest,
+        },
+      }),
+    );
+    expect(resp.ok).toBe(true);
+    const r = resp.result as { signedDerivation: L3Attestation };
+
+    // 3. The L3 links back to the L2 by content-address (write → launch).
+    const slsa = r.signedDerivation.statement as {
+      predicate: { runDetails?: { ocap_links?: Array<{ level: string; digest: { sha256?: string } }> } };
+    };
+    const links = slsa.predicate.runDetails?.ocap_links ?? [];
+    expect(links.some((l) => l.level === "launch" && l.digest.sha256 === l2.l2LaunchDigest)).toBe(true);
+  });
 });

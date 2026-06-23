@@ -499,6 +499,9 @@ async function handleImportAndPush(params: Record<string, unknown>): Promise<unk
   const remote = (params.remote as string | undefined) ?? "origin";
   const pushArgs = (params.pushArgs as string[] | undefined) ?? [];
   const manifestDigest = (params.manifestDigest as string | undefined) ?? "";
+  // Opt-in: the content-address of the box's L2 launch attestation, so the L3
+  // write links back to its launch (capability chain: write → launch).
+  const l2LaunchDigest = params.l2LaunchDigest as string | undefined;
   // Opt-in: project the signed L3 onto the commit as a git note under
   // refs/notes/<notesRef> (e.g. "provenance") so it travels with the repo and is
   // queryable via `git notes show` / `git log --show-notes` / blame → commit → note.
@@ -544,7 +547,7 @@ async function handleImportAndPush(params: Record<string, unknown>): Promise<unk
 
   // 4. L3 attestation over the pushed commit (the signed verdict consumers verify).
   const attestation = signingKey
-    ? buildL3Attestation(commitSha, repo, `refs/heads/${branch}`, manifestDigest)
+    ? buildL3Attestation(commitSha, repo, `refs/heads/${branch}`, manifestDigest, l2LaunchDigest)
     : undefined;
 
   // 5. Opt-in provenance note: attach the signed L3 to the commit as a git note
