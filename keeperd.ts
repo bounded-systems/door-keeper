@@ -205,6 +205,49 @@ function buildL3Attestation(
   };
 }
 
+/**
+ * Build and sign an **L2 launch attestation** — the launching guest attesting
+ * that a room was launched holding exactly these doors (its manifest). Same
+ * signer-door mechanism as the L3 write (this daemon = a guest's signer door,
+ * signing with whichever key it holds); the `level` is what differs. An L3 write
+ * later links back to this L2 by `sha256(canonicalJson(statement))`.
+ *
+ * `subject` is the launched room/box id; `manifestDigest` is the digest of its
+ * resolved door set (authority = held references).
+ */
+function buildLaunchAttestation(subject: string, manifestDigest: string): L3Attestation {
+  const now = new Date().toISOString();
+  const ocapStmt = statement(
+    // Subject: the launched room, identified by its manifest digest.
+    [{ name: subject, digest: { sha256: manifestDigest } }],
+    {
+      level: "launch",
+      producer: {
+        // The launching guest's signer door (whichever key this daemon holds).
+        kind: "keeperd",
+        id: `keeperd:${signingKey?.keyId ?? "unknown"}`,
+      },
+      capabilities: {
+        workcell: "claude-box",
+        manifestDigest: { sha256: manifestDigest },
+      },
+      metadata: {
+        invocationId: `launch-${subject}`,
+        finishedOn: now,
+      },
+    },
+  );
+
+  const stmt = toSLSA(ocapStmt);
+  const stmtJson = canonicalJson(stmt);
+  return {
+    statement: stmt,
+    statementDigest: sha256(stmtJson),
+    signature: signData(stmtJson),
+    keyId: signingKey?.keyId ?? "unknown",
+  };
+}
+
 // ── Git operations ───────────────────────────────────────────────────────────
 
 async function gitExec(repo: string, args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string; code: number }> {
@@ -540,11 +583,38 @@ async function handleImportAndPush(params: Record<string, unknown>): Promise<unk
   };
 }
 
+/**
+ * L2 launch attestation: a guest acting through its signer door attests that a
+ * room was launched holding exactly these doors. The launch key never leaves the
+ * daemon (ocap credential isolation) — the launcher acts *through* the door, the
+ * same way a box does for git-writes. `subject` = the launched room id; `manifest`
+ * = its resolved door set (we digest it: authority = held references).
+ */
+async function handleAttestLaunch(params: Record<string, unknown>): Promise<unknown> {
+  const subject = params.subject as string;
+  const manifest = params.manifest;
+
+  if (!subject || manifest === undefined || manifest === null) {
+    throw { code: "INVALID_PARAMS", message: "subject and manifest required" };
+  }
+  if (!signingKey) {
+    throw { code: "NO_KEY", message: "signing key not loaded" };
+  }
+
+  const manifestDigest = sha256(canonicalJson(manifest));
+  const attestation = buildLaunchAttestation(subject, manifestDigest);
+  // The content-address an L3 write links back to (links[].level="launch").
+  const l2LaunchDigest = sha256(canonicalJson(attestation.statement));
+
+  return { status: "ok", subject, manifestDigest, l2LaunchDigest, attestation };
+}
+
 const METHODS: Record<string, MethodHandler> = {
   status: handleStatus,
   commit: handleCommit,
   push: handlePush,
   "import-and-push": handleImportAndPush,
+  "attest-launch": handleAttestLaunch,
   sign: handleSign,
   verify: handleVerify,
   getPublicKey: handleGetPublicKey,
