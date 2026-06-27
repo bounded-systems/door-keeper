@@ -105,8 +105,11 @@ function loadOrCreateKey(keyPath: string): SigningKey {
 
   if (existsSync(keyPath)) {
     privateKeyPem = readFileSync(keyPath, "utf-8");
-    const privateKey = createPrivateKey(privateKeyPem);
-    const publicKey = createPublicKey(privateKey);
+    // Derive the public key from the private-key PEM directly. Passing a
+    // KeyObject to createPublicKey trips the bun-types overload (it accepts a
+    // PEM/DER string but not a derived KeyObject); the PEM path is equivalent.
+    // (claude-box's mirror gates on tsc; keep this in sync — see claude-box#151.)
+    const publicKey = createPublicKey(privateKeyPem);
     publicKeyPem = publicKey.export({ type: "spki", format: "pem" }) as string;
   } else {
     const { privateKey, publicKey } = generateKeyPairSync("ed25519");
@@ -153,10 +156,44 @@ type L3Attestation = {
 };
 
 /**
+ * AI-authorship reconciliation, recorded in the SIGNED L3 attestation.
+ *
+ * The CLAIM lives in the divergence: the box's in-box checkpoint hook reports
+ * which files the *model* authored (its self-report), but the box is exactly
+ * what might be bypassed, so that report alone proves nothing. keeperd — which
+ * sees the *actual* staged diff and holds the signing key — reconciles the two
+ * here, making AI authorship VERIFIABLE (signed) and a bypass DETECTABLE. See
+ * GITAI-PROVENANCE.md.
+ */
+type Authorship = {
+  model?: string;
+  aiAuthored: string[]; // claimed ∩ actually-staged
+  divergent: string[]; // staged but NOT claimed → bypass (human / untracked edit)
+  stale: string[]; // claimed but NOT staged → never landed
+};
+
+function reconcileAuthorship(
+  stagedFiles: string[],
+  claimed: string[],
+  model?: string,
+): Authorship {
+  const staged = new Set(stagedFiles);
+  const claim = new Set(claimed);
+  return {
+    ...(model ? { model } : {}),
+    aiAuthored: [...staged].filter((f) => claim.has(f)).sort(),
+    divergent: [...staged].filter((f) => !claim.has(f)).sort(),
+    stale: [...claim].filter((f) => !staged.has(f)).sort(),
+  };
+}
+
+/**
  * Build and sign an L3 git-write attestation (SLSA Provenance v1 format).
  *
  * Links back to the L2 launch via manifestDigest — this is the binding that
- * proves the commit came from a box with exactly those capabilities.
+ * proves the commit came from a box with exactly those capabilities. When
+ * `authorship` is provided it is recorded under `predicate.authorship` BEFORE
+ * signing, so the AI-vs-human reconciliation is covered by the signature.
  */
 function buildL3Attestation(
   commitSha: string,
@@ -164,6 +201,7 @@ function buildL3Attestation(
   ref: string,
   manifestDigest: string,
   l2LaunchDigest?: string,
+  authorship?: Authorship,
 ): L3Attestation {
   const now = new Date().toISOString();
 
@@ -197,6 +235,11 @@ function buildL3Attestation(
   // Add repo/ref to externalParameters
   (stmt.predicate.buildDefinition.externalParameters as Record<string, unknown>).repo = repo;
   (stmt.predicate.buildDefinition.externalParameters as Record<string, unknown>).ref = ref;
+
+  // Bind AI authorship into the predicate so it is covered by the signature.
+  if (authorship) {
+    (stmt.predicate as Record<string, unknown>).authorship = authorship;
+  }
 
   // Canonicalize and sign
   const stmtJson = canonicalJson(stmt);
@@ -279,8 +322,9 @@ async function gitCommit(params: {
   all?: boolean;
   amend?: boolean;
   sign?: boolean;
+  authorship?: { model?: string; aiAuthored?: string[] };
 }): Promise<{ commit: string; signature?: string; attestation?: L3Attestation }> {
-  const { repo, message, author, files, all, amend } = params;
+  const { repo, message, author, files, all, amend, authorship } = params;
 
   // Validate repo exists
   if (!existsSync(repo)) {
@@ -305,6 +349,13 @@ async function gitCommit(params: {
   if (statusResult.ok && !amend) {
     throw { code: "NOTHING_TO_COMMIT", message: "no changes staged for commit" };
   }
+
+  // Capture the actually-staged files NOW (before the commit clears the index)
+  // so authorship can be reconciled against what really lands in this commit.
+  const stagedResult = await gitExec(repo, ["diff", "--cached", "--name-only"]);
+  const stagedFiles = stagedResult.ok
+    ? stagedResult.stdout.split("\n").filter(Boolean)
+    : [];
 
   // Build commit command
   const commitArgs = ["commit"];
@@ -338,12 +389,21 @@ async function gitCommit(params: {
     manifestDigest = sha256(capsEnv);
   }
 
+  // Reconcile the model's claimed authorship against what actually staged —
+  // the divergence (staged-but-unclaimed) is a detected bypass. Only when the
+  // box supplied a claim; otherwise authorship is omitted (no false signal).
+  const authorshipRecord = authorship
+    ? reconcileAuthorship(stagedFiles, authorship.aiAuthored ?? [], authorship.model)
+    : undefined;
+
   // Build L3 attestation
   const attestation = buildL3Attestation(
     commitSha,
     repo,
     `refs/heads/${branch}`,
     manifestDigest,
+    undefined,
+    authorshipRecord,
   );
 
   return {
@@ -420,6 +480,9 @@ async function handleCommit(params: Record<string, unknown>): Promise<unknown> {
   const files = params.files as string[] | undefined;
   const all = params.all as boolean | undefined;
   const amend = params.amend as boolean | undefined;
+  const authorship = params.authorship as
+    | { model?: string; aiAuthored?: string[] }
+    | undefined;
 
   if (!repo) {
     throw { code: "INVALID_PARAMS", message: "repo required" };
@@ -428,7 +491,7 @@ async function handleCommit(params: Record<string, unknown>): Promise<unknown> {
     throw { code: "INVALID_PARAMS", message: "message required (unless amending)" };
   }
 
-  return gitCommit({ repo, message, author, files, all, amend });
+  return gitCommit({ repo, message, author, files, all, amend, authorship });
 }
 
 async function handlePush(params: Record<string, unknown>): Promise<unknown> {
@@ -783,11 +846,12 @@ export {
   verifySignature,
   sha256,
   buildL3Attestation,
+  reconcileAuthorship,
   gitExec,
   VERSION,
 };
 
-export type { RequestEnvelope, ResponseEnvelope, SigningKey, L3Attestation };
+export type { RequestEnvelope, ResponseEnvelope, SigningKey, L3Attestation, Authorship };
 
 if (import.meta.main) {
   process.exit(await main());

@@ -16,6 +16,7 @@ import {
   verifySignature,
   sha256,
   buildL3Attestation,
+  reconcileAuthorship,
   canonicalJson,
   gitExec,
   VERSION,
@@ -253,6 +254,86 @@ describe("keeperd", () => {
       const expectedDigest = sha256(canonicalJson(attestation.statement));
 
       expect(attestation.statementDigest).toBe(expectedDigest);
+    });
+  });
+
+  describe("authorship reconciliation (GitAI provenance)", () => {
+    let tempDir: string;
+
+    beforeAll(() => {
+      tempDir = mkdtempSync(join(tmpdir(), "keeperd-authorship-test-"));
+      loadOrCreateKey(join(tempDir, "test.key"));
+    });
+    afterAll(() => rmSync(tempDir, { recursive: true, force: true }));
+
+    test("matched files are aiAuthored, no divergence", () => {
+      const a = reconcileAuthorship(["a.ts", "b.ts"], ["a.ts", "b.ts"], "claude-opus-4-8");
+      expect(a.aiAuthored).toEqual(["a.ts", "b.ts"]);
+      expect(a.divergent).toEqual([]);
+      expect(a.stale).toEqual([]);
+      expect(a.model).toBe("claude-opus-4-8");
+    });
+
+    test("a staged-but-unclaimed file is flagged divergent (bypass)", () => {
+      // The model claimed only a.ts, but b.ts also staged → b.ts is a bypass.
+      const a = reconcileAuthorship(["a.ts", "b.ts"], ["a.ts"]);
+      expect(a.aiAuthored).toEqual(["a.ts"]);
+      expect(a.divergent).toEqual(["b.ts"]);
+      expect(a.stale).toEqual([]);
+    });
+
+    test("a claimed-but-unstaged file is stale", () => {
+      const a = reconcileAuthorship(["a.ts"], ["a.ts", "ghost.ts"]);
+      expect(a.aiAuthored).toEqual(["a.ts"]);
+      expect(a.divergent).toEqual([]);
+      expect(a.stale).toEqual(["ghost.ts"]);
+    });
+
+    test("authorship is recorded in the predicate and covered by the signature", () => {
+      const authorship = reconcileAuthorship(["a.ts", "b.ts"], ["a.ts"], "claude-opus-4-8");
+      const att = buildL3Attestation(
+        "abc123def456abc123def456abc123def456abc1",
+        "/work",
+        "refs/heads/main",
+        "manifest123",
+        undefined,
+        authorship,
+      );
+      const recorded = (att.statement.predicate as Record<string, unknown>)
+        .authorship as typeof authorship;
+      expect(recorded.divergent).toEqual(["b.ts"]);
+      // tamper-evidence: the signature is over the statement WITH authorship
+      expect(verifySignature(canonicalJson(att.statement), att.signature)).toBe(true);
+    });
+
+    test("e2e: commit reconciles claimed authorship against the real staged diff", async () => {
+      const repo = mkdtempSync(join(tmpdir(), "keeperd-authorship-repo-"));
+      await gitExec(repo, ["init"]);
+      await gitExec(repo, ["config", "user.email", "t@t"]);
+      await gitExec(repo, ["config", "user.name", "t"]);
+      writeFileSync(join(repo, "ai.ts"), "// model wrote this\n");
+      writeFileSync(join(repo, "human.ts"), "// a human/untracked edit\n");
+
+      const resp = await handleRequest(
+        JSON.stringify({
+          id: "1",
+          method: "commit",
+          params: {
+            repo,
+            message: "feat: mixed authorship",
+            all: true,
+            authorship: { model: "claude-opus-4-8", aiAuthored: ["ai.ts"] },
+          },
+        }),
+      );
+      rmSync(repo, { recursive: true, force: true });
+
+      expect(resp.ok).toBe(true);
+      const att = (resp.result as { attestation: L3Attestation }).attestation;
+      const authorship = (att.statement.predicate as Record<string, unknown>)
+        .authorship as { aiAuthored: string[]; divergent: string[] };
+      expect(authorship.aiAuthored).toEqual(["ai.ts"]);
+      expect(authorship.divergent).toEqual(["human.ts"]); // bypass detected
     });
   });
 
