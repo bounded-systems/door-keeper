@@ -52,6 +52,7 @@
                 cp ${./lib/keeper.ts} $out/app/lib/keeper.ts
                 cp ${./lib/runtime.ts} $out/app/lib/runtime.ts
                 cp ${./guest-room/daemon.ts} $out/app/guest-room/daemon.ts
+                cp ${./guest-room/mod.ts} $out/app/guest-room/mod.ts
                 cp ${./guest-room/protocol.ts} $out/app/guest-room/protocol.ts
               '';
 
@@ -115,7 +116,7 @@
             type = "app";
             program = "${pkgs.writeShellScriptBin "sync-guest-room" ''
               set -euo pipefail
-              for f in daemon.ts protocol.ts; do
+              for f in daemon.ts mod.ts protocol.ts; do
                 install -m 644 ${guest-room}/$f "$PWD/guest-room/$f"; echo "synced guest-room/$f"
               done
             ''}/bin/sync-guest-room";
@@ -148,7 +149,7 @@
         let pkgs = pkgsFor "aarch64-darwin";
         in {
           guest-room-mirror = pkgs.runCommand "guest-room-mirror" { } ''
-            for f in daemon.ts protocol.ts; do
+            for f in daemon.ts mod.ts protocol.ts; do
               if ! diff -u ${guest-room}/$f ${./guest-room}/$f; then
                 echo "guest-room/$f drifted — run: nix run .#sync-guest-room" >&2; exit 1
               fi
