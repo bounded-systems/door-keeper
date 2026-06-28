@@ -13,7 +13,7 @@
   # The capability engine + contract + client SDK, each a PINNED input and a
   # generated mirror (./guest-room, ./contract, ./lib) kept honest by the
   # *-mirror checks below. Keep the guest-room rev in lockstep with door-kit's.
-  inputs.guest-room.url = "github:bounded-systems/guest-room/5bc85b634a0a8d698243ba3b708f0420516308ec";
+  inputs.guest-room.url = "github:bounded-systems/guest-room/79662abe154039d1bf91f46cefa03a06204e87ef";
   inputs.guest-room.flake = false;
   inputs.ocap-provenance.url = "github:bounded-systems/ocap-provenance/28c7a8530e05edc446abf62cd2e04ab73f4f626f";
   inputs.ocap-provenance.flake = false;
@@ -52,6 +52,7 @@
                 cp ${./lib/keeper.ts} $out/app/lib/keeper.ts
                 cp ${./lib/runtime.ts} $out/app/lib/runtime.ts
                 cp ${./guest-room/daemon.ts} $out/app/guest-room/daemon.ts
+                cp ${./guest-room/mod.ts} $out/app/guest-room/mod.ts
                 cp ${./guest-room/protocol.ts} $out/app/guest-room/protocol.ts
               '';
 
@@ -115,7 +116,7 @@
             type = "app";
             program = "${pkgs.writeShellScriptBin "sync-guest-room" ''
               set -euo pipefail
-              for f in daemon.ts protocol.ts; do
+              for f in daemon.ts mod.ts protocol.ts; do
                 install -m 644 ${guest-room}/$f "$PWD/guest-room/$f"; echo "synced guest-room/$f"
               done
             ''}/bin/sync-guest-room";
@@ -148,7 +149,7 @@
         let pkgs = pkgsFor "aarch64-darwin";
         in {
           guest-room-mirror = pkgs.runCommand "guest-room-mirror" { } ''
-            for f in daemon.ts protocol.ts; do
+            for f in daemon.ts mod.ts protocol.ts; do
               if ! diff -u ${guest-room}/$f ${./guest-room}/$f; then
                 echo "guest-room/$f drifted — run: nix run .#sync-guest-room" >&2; exit 1
               fi

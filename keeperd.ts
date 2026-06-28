@@ -31,11 +31,14 @@ import {
   prepareSocket,
   createLogger,
   showUsage,
+  call,
   type RequestEnvelope,
   type ResponseEnvelope,
   ok,
   err,
 } from "./lib/runtime";
+// Transit-grant verification (signed grants on tcp/vsock).
+import { verifyGrantWithKeys, type IssuerKeys } from "./guest-room/mod.ts";
 
 const log = createLogger("keeperd");
 
@@ -698,6 +701,47 @@ const METHODS: Record<string, MethodHandler> = {
 // ── Request handling ─────────────────────────────────────────────────────────
 // Protocol types (RequestEnvelope, ResponseEnvelope) imported from lib/runtime
 
+// ── Transit-grant gate (tcp/vsock only) ──────────────────────────────────────
+// On a unix door the held socket reference IS authority. On tcp/vsock the kernel
+// gives no peer identity, so a caller must present a SIGNED grant (req.grant) the
+// concierge minted; we verify it against the concierge's PUBLISHED keys (keyless,
+// fetched + cached, re-fetched once on an unknown key) for THIS room and the
+// "keeper" door. Set by serveTcp. (Mirrors the scoutd verifier; door-scout #6.)
+let grantRequired = false;
+
+function conciergeSocket(): string {
+  if (process.env.CONCIERGE_SOCK) return process.env.CONCIERGE_SOCK;
+  const runtime = process.env.XDG_RUNTIME_DIR;
+  if (runtime) return `${runtime}/concierged.sock`;
+  return `${process.env.HOME ?? "/tmp"}/.claude-box/concierged.sock`;
+}
+
+let issuerKeys: IssuerKeys | null = null;
+async function fetchIssuerKeys(force = false): Promise<IssuerKeys> {
+  if (issuerKeys && !force) return issuerKeys;
+  issuerKeys = await call<IssuerKeys>(conciergeSocket(), "keys");
+  return issuerKeys;
+}
+
+const grantVerifyWith = (data: string, signature: string, publicKeyPem: string): boolean =>
+  verify(null, Buffer.from(data), createPublicKey(publicKeyPem), Buffer.from(signature, "base64"));
+
+/** Gate a request on a tcp/vsock door: the presented signed grant must verify
+ *  against the concierge's published keys for this room and the "keeper" door.
+ *  Re-fetches keys ONCE on an unknown key (rotation). */
+async function gateGrant(req: RequestEnvelope): Promise<{ ok: boolean; reason?: string }> {
+  if (!grantRequired) return { ok: true }; // unix: reference is authority
+  const grant = req.grant;
+  if (!grant) return { ok: false, reason: "no-grant" };
+  if (grant.name !== "keeper") return { ok: false, reason: "wrong-door" };
+  const ctx = { audience: process.env.ROOM_ID ?? "", now: Date.now() };
+  let v = verifyGrantWithKeys(grant, ctx, await fetchIssuerKeys(), grantVerifyWith);
+  if (!v.ok && v.reason === "unknown-key") {
+    v = verifyGrantWithKeys(grant, ctx, await fetchIssuerKeys(true), grantVerifyWith);
+  }
+  return v;
+}
+
 async function handleRequest(line: string): Promise<ResponseEnvelope> {
   let req: RequestEnvelope;
   try {
@@ -709,6 +753,12 @@ async function handleRequest(line: string): Promise<ResponseEnvelope> {
   const { id, method, params } = req;
   if (!id || !method) {
     return err(id ?? "", "INVALID_REQUEST", "id and method required");
+  }
+
+  // Transit-grant gate: on tcp/vsock, no valid signed grant ⇒ no handler reached.
+  const gate = await gateGrant(req);
+  if (!gate.ok) {
+    return err(id, "UNAUTHORIZED", `signed grant rejected: ${gate.reason}`);
   }
 
   const handler = METHODS[method];
@@ -766,7 +816,9 @@ async function serveUnix(socketPath: string): Promise<void> {
 
 // Bind to 0.0.0.0 so podman machine VM can reach us via host.containers.internal
 async function serveTcp(port: number, host: string = "0.0.0.0"): Promise<void> {
-  log("INFO", `listening tcp ${host}:${port}`);
+  // tcp/vsock has no kernel peer identity ⇒ require a verified signed grant.
+  grantRequired = true;
+  log("INFO", `listening tcp ${host}:${port} (signed-grant gate, fail-closed)`);
 
   Bun.listen({
     hostname: host,
@@ -847,9 +899,18 @@ export {
   sha256,
   buildL3Attestation,
   reconcileAuthorship,
+  gateGrant,
   gitExec,
   VERSION,
 };
+
+/** Test seams: drive the tcp/vsock grant gate without a live concierge. */
+export function __setGrantRequired(v: boolean): void {
+  grantRequired = v;
+}
+export function __setIssuerKeys(k: IssuerKeys | null): void {
+  issuerKeys = k;
+}
 
 export type { RequestEnvelope, ResponseEnvelope, SigningKey, L3Attestation, Authorship };
 
