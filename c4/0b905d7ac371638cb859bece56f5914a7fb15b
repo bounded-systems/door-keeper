@@ -1,0 +1,26 @@
+keeperd.ts
+  s_d18f41cb48193c::t_26bf500cf99874 819-821
+  s_d18f41cb48193c::t_69061381e9b4f9 34,40-41
+  s_d18f41cb48193c::t_089958425b2aca 704-744,758-762
+  s_d18f41cb48193c::t_fde3ab74cd9d35 902,907-913
+  s_d18f41cb48193c::t_d1d53d0b2db297 763
+  s_d18f41cb48193c::t_b7b0333e099fc5 914
+tests/grant-gate.test.ts
+  s_d18f41cb48193c::t_778cc5c1cb5e00 1-63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "c40b905d7ac371638cb859bece56f5914a7fb15b",
+  "prompts": {},
+  "sessions": {
+    "s_d18f41cb48193c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e1595d1-4205-44e9-b5db-d6ccebeae882",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Robert DeLanghe <1240090+bdelanghe@users.noreply.github.com>"
+    }
+  }
+}
