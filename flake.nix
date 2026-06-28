@@ -13,7 +13,7 @@
   # The capability engine + contract + client SDK, each a PINNED input and a
   # generated mirror (./guest-room, ./contract, ./lib) kept honest by the
   # *-mirror checks below. Keep the guest-room rev in lockstep with door-kit's.
-  inputs.guest-room.url = "github:bounded-systems/guest-room/5bc85b634a0a8d698243ba3b708f0420516308ec";
+  inputs.guest-room.url = "github:bounded-systems/guest-room/79662abe154039d1bf91f46cefa03a06204e87ef";
   inputs.guest-room.flake = false;
   inputs.ocap-provenance.url = "github:bounded-systems/ocap-provenance/28c7a8530e05edc446abf62cd2e04ab73f4f626f";
   inputs.ocap-provenance.flake = false;
