@@ -1,0 +1,25 @@
+flake.lock
+  s_70508ca017cb29::t_f7bc62c5ea1437 6-7,10,16
+flake.nix
+  s_70508ca017cb29::t_6f9b0f6d28ae4e 20
+lib/keeper.ts
+  s_70508ca017cb29::t_c396b9d426de13 2,21-27,31,45-52,55,66,80,86,92,98,105,107,109,152-154,175-176,271-273,292-382,429-455,468-474
+lib/runtime.ts
+  s_70508ca017cb29::t_1c294e57fb707c 2,22,34,57-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "83b48416840bd42e590eddc41b4482626369980e",
+  "prompts": {},
+  "sessions": {
+    "s_70508ca017cb29": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d283f13f-34c8-429b-8cb1-b020e645c0e4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Robert DeLanghe <1240090+bdelanghe@users.noreply.github.com>"
+    }
+  }
+}
