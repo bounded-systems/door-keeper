@@ -1,0 +1,21 @@
+flake.nix
+  s_70508ca017cb29::t_12eb209228f7e6 59,145,191
+lib/concierge.ts
+  s_70508ca017cb29::t_d526b6b7989a7b 1-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "b1ca9d2bf89a48f1d61bf89643172c522a422d47",
+  "prompts": {},
+  "sessions": {
+    "s_70508ca017cb29": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d283f13f-34c8-429b-8cb1-b020e645c0e4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Robert DeLanghe <1240090+bdelanghe@users.noreply.github.com>"
+    }
+  }
+}
