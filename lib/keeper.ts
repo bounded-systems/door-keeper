@@ -1,4 +1,5 @@
 /**
+ * @module
  * keeper.ts — in-box client for keeperd
  *
  * A box with the `--keeper` door can use this to make signed commits and pushes.
@@ -17,10 +18,17 @@
  *   await push({ repo: "/work" });
  */
 
-import { connect } from "bun";
+// Bun.connect via the global (no `import … from "bun"`) so the package resolves
+// on JSR/Deno publish — the same way the guest-room protocol uses Bun globals.
+// (Full Deno/Bun-agnostic abstraction is tracked separately.)
+const connect = Bun.connect;
+
+import { heldGrant } from "./concierge.ts";
+import type { SignedGrant } from "../guest-room/mod.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+/** Options for creating a signed commit via keeperd. */
 export type CommitOptions = {
   /** Repository path */
   repo: string;
@@ -34,8 +42,17 @@ export type CommitOptions = {
   all?: boolean;
   /** Amend the last commit */
   amend?: boolean;
+  /**
+   * The model's CLAIMED AI authorship for this commit — a self-report, not
+   * authority. keeperd reconciles it against the files that actually stage and
+   * records aiAuthored / divergent (bypass) / stale in the signed L3 attestation
+   * (see door-keeper, GITAI-PROVENANCE.md). Omit it and keeperd records no
+   * authorship (no false signal). `aiAuthored` is repo-relative paths.
+   */
+  authorship?: { model?: string; aiAuthored?: string[] };
 };
 
+/** Result of a signed commit operation via keeperd. */
 export type CommitResult = {
   commit: string;
   attestation?: {
@@ -46,6 +63,7 @@ export type CommitResult = {
   };
 };
 
+/** Options for pushing to a remote repository via keeperd. */
 export type PushOptions = {
   /** Repository path */
   repo: string;
@@ -59,29 +77,36 @@ export type PushOptions = {
   setUpstream?: boolean;
 };
 
+/** Result of a push operation via keeperd. */
 export type PushResult = {
   pushed: string;
   commits: string[];
 };
 
+/** Result of a sign operation via keeperd. */
 export type SignResult = {
   signature: string;
   keyId: string;
 };
 
+/** Result of a signature verification via keeperd. */
 export type VerifyResult = {
   valid: boolean;
   keyId?: string;
 };
 
+/** Health and status information from keeperd. */
 export type KeeperStatus = {
   version: string;
   uptime: number;
   signing: { enabled: boolean; keyId?: string };
 };
 
+/** Error from keeperd operations, with an error code for pattern matching. */
 export class KeeperError extends Error {
+  /** Machine-readable error code for pattern matching. */
   code: string;
+  /** Create a KeeperError with a `code` and human-readable `message`. */
   constructor(code: string, message: string) {
     super(message);
     this.code = code;
@@ -124,6 +149,9 @@ type RequestEnvelope = {
   id: string;
   method: string;
   params?: Record<string, unknown>;
+  /** The signed grant this box holds for "keeper", presented so a tcp/vsock
+   *  keeperd can verify it (no-op on a unix door). */
+  grant?: SignedGrant;
 };
 
 type ResponseEnvelope = {
@@ -144,7 +172,8 @@ async function request<T>(method: string, params: Record<string, unknown> = {}):
 
     const socketHandler = {
       open(sock: ReturnType<typeof connect> extends Promise<infer S> ? S : never) {
-        const req: RequestEnvelope = { id, method, params };
+        const grant = heldGrant("keeper"); // present it iff resolved (tcp/vsock gate)
+        const req: RequestEnvelope = { id, method, params, ...(grant ? { grant } : {}) };
         sock.write(JSON.stringify(req) + "\n");
       },
       data(sock: ReturnType<typeof connect> extends Promise<infer S> ? S : never, data: Buffer) {
@@ -239,6 +268,9 @@ export async function commit(options: CommitOptions): Promise<CommitResult> {
     files: options.files,
     all: options.all ?? false,
     amend: options.amend ?? false,
+    // Forwarded only when supplied — keeperd treats absent authorship as
+    // "no claim" (older keeperds simply ignore the extra param).
+    ...(options.authorship ? { authorship: options.authorship } : {}),
   });
 }
 
@@ -254,6 +286,97 @@ export async function push(options: PushOptions): Promise<PushResult> {
     branch: options.branch,
     force: options.force ?? false,
     setUpstream: options.setUpstream ?? false,
+  });
+}
+
+/** Options for import-and-push: the host builds commits locally (keyless) and keeperd signs the push. */
+export type ImportAndPushOptions = {
+  /** The repo keeperd imports the bundle into and pushes from (the daemon-side
+   *  keeper clone; path-translated like `commit`/`push` via CLAUDE_BOX_HOST_REPO).
+   *  Required — the daemon has no implicit repo. */
+  repo: string;
+  /** Commit-range git bundle (base64) carrying the new commits the host built. */
+  bundleBase64: string;
+  /** The already-materialized commit the daemon imports as the tip and pushes. */
+  commitSha: string;
+  /** Branch to point at the imported commit and push. */
+  branch: string;
+  /** Push remote (e.g. `origin`). */
+  remote: string;
+  /** Extra `git push` args after `<remote> <branch>` (e.g. `--force-with-lease`). */
+  pushArgs?: string[];
+  /** Opt-in attestation: keeperd emits a signed `push/v1` derivation here. */
+  ledgerRef?: string;
+  /** Opt-in: project the signed attestation onto the pushed commit as a git note
+   *  under `refs/notes/<notesRef>` (e.g. `"provenance"`) and push the notes ref. */
+  notesRef?: string;
+  /** Opt-in: the content-address of the box's L2 launch attestation, so the L3
+   *  write links back to its launch (capability chain: write → launch). */
+  l2LaunchDigest?: string;
+};
+
+/** Result of an import-and-push operation: either success with pushed identity or an error verdict. */
+export type ImportAndPushResult =
+  | {
+      status: "ok";
+      commitSha: string;
+      pushedRef: string;
+      signedDerivation?: unknown;
+      note?: { ref: string; written: boolean; pushed: boolean };
+    }
+  | { status: "error"; code: string; message: string; exitCode?: number };
+
+/**
+ * Ask keeperd to import the host-built commit-range bundle and signed-push its
+ * branch (object-transfer "model A"). Use this when the host commits locally
+ * (keyless) and the daemon must hold ONLY the push credential + signing key.
+ */
+export async function importAndPush(
+  options: ImportAndPushOptions,
+): Promise<ImportAndPushResult> {
+  return request<ImportAndPushResult>("import-and-push", {
+    kind: "import-and-push",
+    repo: translateRepoPath(options.repo),
+    bundleBase64: options.bundleBase64,
+    commitSha: options.commitSha,
+    branch: options.branch,
+    remote: options.remote,
+    ...(options.pushArgs !== undefined ? { pushArgs: options.pushArgs } : {}),
+    ...(options.ledgerRef !== undefined ? { ledgerRef: options.ledgerRef } : {}),
+    ...(options.notesRef !== undefined ? { notesRef: options.notesRef } : {}),
+    ...(options.l2LaunchDigest !== undefined ? { l2LaunchDigest: options.l2LaunchDigest } : {}),
+  });
+}
+
+/** Options for attesting a room launch: captures the doors held at launch time. */
+export type AttestLaunchOptions = {
+  /** The launched room/box id (the subject of the launch attestation). */
+  subject: string;
+  /** The room's resolved door set / manifest (authority = held references). */
+  manifest: unknown;
+};
+
+/** Result of a launch attestation: either a signed L2 with content address or an error. */
+export type AttestLaunchResult =
+  | {
+      status: "ok";
+      subject: string;
+      manifestDigest: string;
+      l2LaunchDigest: string;
+      attestation: unknown;
+    }
+  | { status: "error"; code: string; message: string };
+
+/**
+ * Ask a signer door to produce a signed **L2 launch attestation** over a room +
+ * the doors it holds. The launcher acts THROUGH the door — the signing key never
+ * leaves the daemon (ocap credential isolation). The human is a guest too, so the
+ * launcher is just the launching guest's own signer door.
+ */
+export async function attestLaunch(options: AttestLaunchOptions): Promise<AttestLaunchResult> {
+  return request<AttestLaunchResult>("attest-launch", {
+    subject: options.subject,
+    manifest: options.manifest,
   });
 }
 
@@ -303,6 +426,33 @@ export async function isAvailable(): Promise<boolean> {
 
 // ── CLI (for testing) ────────────────────────────────────────────────────────
 
+/**
+ * Read an AI-authorship CLAIM from the file named by `$KEEPER_AUTHORSHIP_SINK`
+ * (newline-delimited, repo-relative paths the model edited) and truncate it.
+ * The sink is a self-report channel populated out-of-band — e.g. an agent's
+ * edit hook — so the CLI need not know how the claim was produced; keeperd
+ * reconciles it against the real staged diff. Absent / empty / unreadable → no
+ * claim (keeperd then records no authorship). `$KEEPER_AUTHORSHIP_MODEL` labels
+ * the model, if set.
+ */
+async function readAuthorshipSink(): Promise<{ model?: string; aiAuthored: string[] } | undefined> {
+  const path = process.env.KEEPER_AUTHORSHIP_SINK;
+  if (!path) return undefined;
+  try {
+    const f = Bun.file(path);
+    if (!(await f.exists())) return undefined;
+    const aiAuthored = [
+      ...new Set((await f.text()).split("\n").map((s) => s.trim()).filter(Boolean)),
+    ].sort();
+    await Bun.write(path, ""); // next commit starts fresh (best-effort)
+    if (!aiAuthored.length) return undefined;
+    const model = process.env.KEEPER_AUTHORSHIP_MODEL;
+    return { ...(model ? { model } : {}), aiAuthored };
+  } catch {
+    return undefined;
+  }
+}
+
 async function main(): Promise<number> {
   const [cmd, ...args] = Bun.argv.slice(2);
 
@@ -315,7 +465,13 @@ async function main(): Promise<number> {
     case "commit": {
       const repo = args[0] ?? ".";
       const message = args[1] ?? "commit via keeper";
-      const result = await commit({ repo, message, all: true });
+      const authorship = await readAuthorshipSink();
+      const result = await commit({
+        repo,
+        message,
+        all: true,
+        ...(authorship ? { authorship } : {}),
+      });
       console.log(`committed ${result.commit}`);
       if (result.attestation) {
         console.log(`attestation: ${result.attestation.statementDigest}`);

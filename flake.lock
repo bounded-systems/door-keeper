@@ -3,17 +3,17 @@
     "door-kit": {
       "flake": false,
       "locked": {
-        "lastModified": 1781623552,
-        "narHash": "sha256-zFHSjSmXDs7UGdIN9oC3g2q8N9tSNUJr5zscY9jMAl0=",
+        "lastModified": 1783203048,
+        "narHash": "sha256-7k7ADJGR5XPB17u9XRK+m3sRva4gRV1JJzLLQDN733M=",
         "owner": "bounded-systems",
         "repo": "door-kit",
-        "rev": "a3ae40e5075e3dbded3db9a0d345f842984a646b",
+        "rev": "4b72a33d4f03c7f5869c229adf8617802656a1b5",
         "type": "github"
       },
       "original": {
         "owner": "bounded-systems",
         "repo": "door-kit",
-        "rev": "a3ae40e5075e3dbded3db9a0d345f842984a646b",
+        "rev": "4b72a33d4f03c7f5869c229adf8617802656a1b5",
         "type": "github"
       }
     },
@@ -31,6 +31,22 @@
         "owner": "bounded-systems",
         "repo": "guest-room",
         "rev": "79662abe154039d1bf91f46cefa03a06204e87ef",
+        "type": "github"
+      }
+    },
+    "keeper-wire": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1783199545,
+        "narHash": "sha256-wDQsLLD5/xoE4xXNiZkM5KCl+0VutO6bAb4T75naF4s=",
+        "owner": "bounded-systems",
+        "repo": "keeper-wire",
+        "rev": "a2c0e504e6a8e82529c4c3d38b9f8f25a7fec4d5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "bounded-systems",
+        "repo": "keeper-wire",
         "type": "github"
       }
     },
@@ -71,6 +87,7 @@
       "inputs": {
         "door-kit": "door-kit",
         "guest-room": "guest-room",
+        "keeper-wire": "keeper-wire",
         "nixpkgs": "nixpkgs",
         "ocap-provenance": "ocap-provenance"
       }

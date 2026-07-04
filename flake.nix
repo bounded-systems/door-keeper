@@ -17,10 +17,15 @@
   inputs.guest-room.flake = false;
   inputs.ocap-provenance.url = "github:bounded-systems/ocap-provenance/28c7a8530e05edc446abf62cd2e04ab73f4f626f";
   inputs.ocap-provenance.flake = false;
-  inputs.door-kit.url = "github:bounded-systems/door-kit/a3ae40e5075e3dbded3db9a0d345f842984a646b";
+  inputs.door-kit.url = "github:bounded-systems/door-kit/4b72a33d4f03c7f5869c229adf8617802656a1b5";
   inputs.door-kit.flake = false;
+  # the PUBLISHED keeper-wire agreement — keeperd's own METHODS are checked
+  # against it, so the contract (not this daemon) is the source of truth.
+  inputs.keeper-wire.url = "github:bounded-systems/keeper-wire";
+  inputs.keeper-wire.flake = false;
 
-  outputs = { self, nixpkgs, guest-room, ocap-provenance, door-kit }:
+  outputs =
+    { self, nixpkgs, guest-room, ocap-provenance, door-kit, keeper-wire }:
     let
       systems = [ "aarch64-linux" "x86_64-linux" ];
       forEach = nixpkgs.lib.genAttrs systems;
@@ -144,9 +149,26 @@
           };
         };
 
-      # ── mirror checks: the vendored dirs must match the pinned inputs ──
-      checks.aarch64-darwin =
-        let pkgs = pkgsFor "aarch64-darwin";
+      # ── daemon-side wire conformance (Linux, so CI actually runs it) ──
+      # keeperd's METHODS table must match the published keeper-wire agreement.
+      # Unlike the darwin-only mirror checks below, this is Linux-scoped and wired
+      # into CI (nix build .#checks.<sys>.keeper-wire-methods).
+      checks = (forEach (system:
+        let pkgs = pkgsFor system;
+        in {
+          keeper-wire-methods = pkgs.runCommand "keeper-wire-methods" {
+            nativeBuildInputs = [ pkgs.deno ];
+            DENO_DIR = "/tmp/deno";
+          } ''
+            export HOME=$TMPDIR
+            deno run --no-remote --allow-read ${./tests/keeper-wire-methods.ts} \
+              ${./keeperd.ts} \
+              ${keeper-wire}/manifest.json
+            touch $out
+          '';
+        })) // {
+        # ── mirror checks: the vendored dirs must match the pinned inputs ──
+        aarch64-darwin = let pkgs = pkgsFor "aarch64-darwin";
         in {
           guest-room-mirror = pkgs.runCommand "guest-room-mirror" { } ''
             for f in daemon.ts mod.ts protocol.ts; do
@@ -173,5 +195,6 @@
             touch $out
           '';
         };
+      };
     };
 }

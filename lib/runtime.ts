@@ -1,4 +1,5 @@
 /**
+ * @module
  * runtime.ts — claude-box runtime helpers for daemons.
  *
  * Bridges the guest-agnostic guest-room/ modules with claude-box-specific
@@ -18,7 +19,7 @@ import {
   type RunDirFn,
 } from "../guest-room/daemon.ts";
 
-// Re-export protocol types for convenience
+// Re-export protocol types and functions for convenience.
 export {
   type RequestEnvelope,
   type ResponseEnvelope,
@@ -30,7 +31,7 @@ export {
   type MethodRegistry,
 } from "../guest-room/protocol.ts";
 
-// Re-export daemon utilities
+// Re-export daemon utilities.
 export { prepareSocket, type Env };
 
 /**
@@ -53,7 +54,9 @@ export function defaultSocketPath(name: string, env: Env = process.env): string 
 /**
  * Create a logger for a claude-box daemon.
  */
-export function createLogger(name: string) {
+export function createLogger(
+  name: string,
+): (level: "INFO" | "ALLOW" | "DENY" | "ERR" | "WARN", message: string) => void {
   return genericLogger(name);
 }
 
