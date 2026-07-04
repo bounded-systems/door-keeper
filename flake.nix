@@ -53,6 +53,9 @@
               keeperdSrc = pkgs.runCommand "keeperd-src" { } ''
                 mkdir -p $out/app/lib $out/app/guest-room
                 cp ${./keeperd.ts} $out/app/keeperd.ts
+                # the published keeper-wire agreement, next to keeperd for the
+                # runtime shadow-validation (log-only). Kept fresh by the pin.
+                cp ${keeper-wire}/manifest.json $out/app/keeper-wire.manifest.json
                 cp -r ${./contract} $out/app/contract
                 cp ${./lib/keeper.ts} $out/app/lib/keeper.ts
                 cp ${./lib/runtime.ts} $out/app/lib/runtime.ts
