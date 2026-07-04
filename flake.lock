@@ -34,6 +34,22 @@
         "type": "github"
       }
     },
+    "keeper-wire": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1783199545,
+        "narHash": "sha256-wDQsLLD5/xoE4xXNiZkM5KCl+0VutO6bAb4T75naF4s=",
+        "owner": "bounded-systems",
+        "repo": "keeper-wire",
+        "rev": "a2c0e504e6a8e82529c4c3d38b9f8f25a7fec4d5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "bounded-systems",
+        "repo": "keeper-wire",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1781359544,
@@ -71,6 +87,7 @@
       "inputs": {
         "door-kit": "door-kit",
         "guest-room": "guest-room",
+        "keeper-wire": "keeper-wire",
         "nixpkgs": "nixpkgs",
         "ocap-provenance": "ocap-provenance"
       }
