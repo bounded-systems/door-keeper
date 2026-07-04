@@ -1,0 +1,41 @@
+flake.nix
+  s_70508ca017cb29::t_1e352bd3e9d808 152-171
+  s_70508ca017cb29::t_df817fbaf4e703 22-25,27-28
+  s_70508ca017cb29::t_217d819531b8ab 20
+  s_70508ca017cb29::t_69cfc2d61328ec 198
+tests/keeper-wire-methods.ts
+  s_70508ca017cb29::t_a5ab67a1c21e72 1-42
+lib/runtime.ts
+  s_70508ca017cb29::t_6bd88c53dd736e 2,22,34,57-59
+flake.lock
+  s_70508ca017cb29::t_08d8315203d6a6 37-52,90
+  s_70508ca017cb29::t_158657660cff33 6-7,10,16
+lib/keeper.ts
+  s_70508ca017cb29::t_0c386ab4bc5de9 2,21-27,31,45-52,55,66,80,86,92,98,105,107,109,152-154,175-176,271-273,292-382,429-455,468-474
+.github/workflows/wire-check.yml
+  s_e0a4e094afcd00::t_df97e8122ebbb1 1-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "0cd2acf76fb1f026bf13fdb4e2c3ad4d0a53da61",
+  "prompts": {},
+  "sessions": {
+    "s_70508ca017cb29": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d283f13f-34c8-429b-8cb1-b020e645c0e4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Robert DeLanghe <1240090+bdelanghe@users.noreply.github.com>"
+    },
+    "s_e0a4e094afcd00": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db755f05-3e88-41a1-9828-4de18be948b3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Robert DeLanghe <1240090+bdelanghe@users.noreply.github.com>"
+    }
+  }
+}
