@@ -3,17 +3,17 @@
     "door-kit": {
       "flake": false,
       "locked": {
-        "lastModified": 1781623552,
-        "narHash": "sha256-zFHSjSmXDs7UGdIN9oC3g2q8N9tSNUJr5zscY9jMAl0=",
+        "lastModified": 1783203048,
+        "narHash": "sha256-7k7ADJGR5XPB17u9XRK+m3sRva4gRV1JJzLLQDN733M=",
         "owner": "bounded-systems",
         "repo": "door-kit",
-        "rev": "a3ae40e5075e3dbded3db9a0d345f842984a646b",
+        "rev": "4b72a33d4f03c7f5869c229adf8617802656a1b5",
         "type": "github"
       },
       "original": {
         "owner": "bounded-systems",
         "repo": "door-kit",
-        "rev": "a3ae40e5075e3dbded3db9a0d345f842984a646b",
+        "rev": "4b72a33d4f03c7f5869c229adf8617802656a1b5",
         "type": "github"
       }
     },

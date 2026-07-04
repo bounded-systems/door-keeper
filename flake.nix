@@ -17,7 +17,7 @@
   inputs.guest-room.flake = false;
   inputs.ocap-provenance.url = "github:bounded-systems/ocap-provenance/28c7a8530e05edc446abf62cd2e04ab73f4f626f";
   inputs.ocap-provenance.flake = false;
-  inputs.door-kit.url = "github:bounded-systems/door-kit/a3ae40e5075e3dbded3db9a0d345f842984a646b";
+  inputs.door-kit.url = "github:bounded-systems/door-kit/4b72a33d4f03c7f5869c229adf8617802656a1b5";
   inputs.door-kit.flake = false;
   # the PUBLISHED keeper-wire agreement — keeperd's own METHODS are checked
   # against it, so the contract (not this daemon) is the source of truth.
