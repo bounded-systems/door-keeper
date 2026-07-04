@@ -1,0 +1,21 @@
+lib/keeper.ts
+  s_70508ca017cb29::t_0c386ab4bc5de9 2,21-27,31,45-52,55,66,80,86,92,98,105,107,109,152-154,175-176,271-273,292-382,429-455,468-474
+lib/runtime.ts
+  s_70508ca017cb29::t_6bd88c53dd736e 2,22,34,57-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "10e6d6bbd3963bab483a4cdbc1c0acc6bda9cf1d",
+  "prompts": {},
+  "sessions": {
+    "s_70508ca017cb29": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d283f13f-34c8-429b-8cb1-b020e645c0e4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Robert DeLanghe <1240090+bdelanghe@users.noreply.github.com>"
+    }
+  }
+}
