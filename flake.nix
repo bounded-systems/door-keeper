@@ -56,6 +56,7 @@
                 cp -r ${./contract} $out/app/contract
                 cp ${./lib/keeper.ts} $out/app/lib/keeper.ts
                 cp ${./lib/runtime.ts} $out/app/lib/runtime.ts
+                cp ${./lib/concierge.ts} $out/app/lib/concierge.ts
                 cp ${./guest-room/daemon.ts} $out/app/guest-room/daemon.ts
                 cp ${./guest-room/mod.ts} $out/app/guest-room/mod.ts
                 cp ${./guest-room/protocol.ts} $out/app/guest-room/protocol.ts
@@ -141,7 +142,7 @@
             type = "app";
             program = "${pkgs.writeShellScriptBin "sync-door-kit" ''
               set -euo pipefail
-              for f in keeper.ts runtime.ts; do
+              for f in keeper.ts runtime.ts concierge.ts; do
                 install -m 644 ${door-kit}/lib/$f "$PWD/lib/$f"; echo "synced lib/$f"
               done
             ''}/bin/sync-door-kit";
@@ -187,7 +188,7 @@
             touch $out
           '';
           door-kit-mirror = pkgs.runCommand "door-kit-mirror" { } ''
-            for f in keeper.ts runtime.ts; do
+            for f in keeper.ts runtime.ts concierge.ts; do
               if ! diff -u ${door-kit}/lib/$f ${./lib}/$f; then
                 echo "lib/$f drifted — run: nix run .#sync-door-kit" >&2; exit 1
               fi
