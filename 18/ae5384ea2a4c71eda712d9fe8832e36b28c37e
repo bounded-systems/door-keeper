@@ -1,0 +1,25 @@
+flake.nix
+  s_70508ca017cb29::t_df817fbaf4e703 22-25,27-28
+  s_70508ca017cb29::t_69cfc2d61328ec 198
+  s_70508ca017cb29::t_1e352bd3e9d808 152-171
+tests/keeper-wire-methods.ts
+  s_70508ca017cb29::t_a5ab67a1c21e72 1-42
+flake.lock
+  s_70508ca017cb29::t_08d8315203d6a6 37-52,90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.3",
+  "base_commit_sha": "18ae5384ea2a4c71eda712d9fe8832e36b28c37e",
+  "prompts": {},
+  "sessions": {
+    "s_70508ca017cb29": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d283f13f-34c8-429b-8cb1-b020e645c0e4",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Robert DeLanghe <1240090+bdelanghe@users.noreply.github.com>"
+    }
+  }
+}
