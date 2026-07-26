@@ -7,8 +7,12 @@ import { tmpdir } from "node:os";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { handleRequest, loadOrCreateKey, verifySignature, gitExec, canonicalJson } from "../keeperd";
+import { handleRequest, loadOrCreateKey, verifySignature, gitExec, canonicalJson, sha256 } from "../keeperd";
 import type { L3Attestation } from "../keeperd";
+
+// keeperd derives the L3 capabilities digest ITSELF from this env (set by
+// launcherd at L2) — it is not a wire param. See door-kit#21.
+const CAPS = "keeper=1,net=0,scout=1";
 
 const HEX40 = /^[0-9a-f]{40}$/;
 
@@ -20,7 +24,10 @@ describe("import-and-push (model A)", () => {
   const branch = "GH-1";
   let commitSha = "";
 
+  const priorCaps = process.env.CLAUDE_BOX_CAPABILITIES;
+
   beforeAll(async () => {
+    process.env.CLAUDE_BOX_CAPABILITIES = CAPS;
     root = mkdtempSync(join(tmpdir(), "kd-iap-"));
     loadOrCreateKey(join(root, "key.pem")); // sets the module signing key
     remote = join(root, "remote.git");
@@ -42,7 +49,11 @@ describe("import-and-push (model A)", () => {
     await gitExec(root, ["clone", remote, keeperRepo]);
   });
 
-  afterAll(() => rmSync(root, { recursive: true, force: true }));
+  afterAll(() => {
+    if (priorCaps === undefined) delete process.env.CLAUDE_BOX_CAPABILITIES;
+    else process.env.CLAUDE_BOX_CAPABILITIES = priorCaps;
+    rmSync(root, { recursive: true, force: true });
+  });
 
   test("imports the bundle, verifies the tip, signed-pushes, returns a valid L3", async () => {
     // Host builds the new commit on `branch` + a commit-range bundle (main..branch).
@@ -67,7 +78,6 @@ describe("import-and-push (model A)", () => {
           commitSha,
           branch,
           remote: "origin",
-          manifestDigest: "d".repeat(64),
         },
       }),
     );
@@ -86,6 +96,13 @@ describe("import-and-push (model A)", () => {
     expect(result.signedDerivation).toBeDefined();
     const att = result.signedDerivation!;
     expect(verifySignature(canonicalJson(att.statement), att.signature)).toBe(true);
+
+    // Regression (door-kit#21): the L3 capabilities digest is keeperd-computed
+    // as sha256(CLAUDE_BOX_CAPABILITIES), NOT read off the wire — so it is the
+    // real box capability digest, never empty.
+    const caps = att.statement.predicate.buildDefinition.externalParameters
+      .capabilities as { manifestDigest: { sha256: string } };
+    expect(caps.manifestDigest.sha256).toBe(sha256(CAPS));
 
     // The remote actually received the branch at the host commit.
     const ls = await gitExec(root, ["ls-remote", remote, `refs/heads/${branch}`]);
