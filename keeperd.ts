@@ -570,7 +570,13 @@ async function handleImportAndPush(params: Record<string, unknown>): Promise<unk
   const branch = params.branch as string;
   const remote = (params.remote as string | undefined) ?? "origin";
   const pushArgs = (params.pushArgs as string[] | undefined) ?? [];
-  const manifestDigest = (params.manifestDigest as string | undefined) ?? "";
+  // Manifest digest: keeperd computes it ITSELF as sha256(CLAUDE_BOX_CAPABILITIES)
+  // from the box's env (set by launcherd at L2) — exactly as the `commit` handler
+  // does. It is NOT a wire param (see the keeper-wire spec). Previously this read
+  // `params.manifestDigest`, which the conforming client never sends, so every L3
+  // write attestation carried an empty capabilities digest (door-kit#21).
+  const capsEnv = process.env.CLAUDE_BOX_CAPABILITIES;
+  const manifestDigest = capsEnv ? sha256(capsEnv) : "unknown";
   // Opt-in: the content-address of the box's L2 launch attestation, so the L3
   // write links back to its launch (capability chain: write → launch).
   // Explicit param wins; else fall back to the launch this daemon attested.
