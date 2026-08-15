@@ -3,34 +3,34 @@
     "door-kit": {
       "flake": false,
       "locked": {
-        "lastModified": 1783203048,
-        "narHash": "sha256-7k7ADJGR5XPB17u9XRK+m3sRva4gRV1JJzLLQDN733M=",
+        "lastModified": 1786152409,
+        "narHash": "sha256-AuxYpnUTi8M3GUDPmJOJtU+/3Cw6dzfboVqQne58YD0=",
         "owner": "bounded-systems",
         "repo": "door-kit",
-        "rev": "4b72a33d4f03c7f5869c229adf8617802656a1b5",
+        "rev": "436b269a8cff286e14e700a99455ea6151ff8b2d",
         "type": "github"
       },
       "original": {
         "owner": "bounded-systems",
         "repo": "door-kit",
-        "rev": "4b72a33d4f03c7f5869c229adf8617802656a1b5",
+        "rev": "436b269a8cff286e14e700a99455ea6151ff8b2d",
         "type": "github"
       }
     },
     "guest-room": {
       "flake": false,
       "locked": {
-        "lastModified": 1782608591,
-        "narHash": "sha256-l4GOk9odvs6I9ZWdpegqm6E0ABNKp5r3HVvEmvG9nNw=",
+        "lastModified": 1783274363,
+        "narHash": "sha256-gW7B0dT+dwTrYM25mgzv/bcqOcQ0C+nEd7H3ITRQbKc=",
         "owner": "bounded-systems",
         "repo": "guest-room",
-        "rev": "79662abe154039d1bf91f46cefa03a06204e87ef",
+        "rev": "e8cbeaa664ebe5a2ec90ad6ebf9f9c4cbe25895c",
         "type": "github"
       },
       "original": {
         "owner": "bounded-systems",
         "repo": "guest-room",
-        "rev": "79662abe154039d1bf91f46cefa03a06204e87ef",
+        "rev": "e8cbeaa664ebe5a2ec90ad6ebf9f9c4cbe25895c",
         "type": "github"
       }
     },

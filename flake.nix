@@ -13,11 +13,11 @@
   # The capability engine + contract + client SDK, each a PINNED input and a
   # generated mirror (./guest-room, ./contract, ./lib) kept honest by the
   # *-mirror checks below. Keep the guest-room rev in lockstep with door-kit's.
-  inputs.guest-room.url = "github:bounded-systems/guest-room/79662abe154039d1bf91f46cefa03a06204e87ef";
+  inputs.guest-room.url = "github:bounded-systems/guest-room/e8cbeaa664ebe5a2ec90ad6ebf9f9c4cbe25895c";
   inputs.guest-room.flake = false;
   inputs.ocap-provenance.url = "github:bounded-systems/ocap-provenance/28c7a8530e05edc446abf62cd2e04ab73f4f626f";
   inputs.ocap-provenance.flake = false;
-  inputs.door-kit.url = "github:bounded-systems/door-kit/4b72a33d4f03c7f5869c229adf8617802656a1b5";
+  inputs.door-kit.url = "github:bounded-systems/door-kit/436b269a8cff286e14e700a99455ea6151ff8b2d";
   inputs.door-kit.flake = false;
   # the PUBLISHED keeper-wire agreement — keeperd's own METHODS are checked
   # against it, so the contract (not this daemon) is the source of truth.
@@ -168,6 +168,17 @@
             deno run --no-remote --allow-read ${./tests/keeper-wire-methods.ts} \
               ${./keeperd.ts} \
               ${keeper-wire}/manifest.json
+            touch $out
+          '';
+          # Linux copy of the door-kit mirror check, wired into CI (wire-check.yml)
+          # so vendored-client drift is caught on every PR — the darwin-only copy
+          # below never ran in CI, which is how issue #15's drift went unnoticed.
+          door-kit-mirror = pkgs.runCommand "door-kit-mirror" { } ''
+            for f in keeper.ts runtime.ts concierge.ts; do
+              if ! diff -u ${door-kit}/lib/$f ${./lib}/$f; then
+                echo "lib/$f drifted — run: nix run .#sync-door-kit" >&2; exit 1
+              fi
+            done
             touch $out
           '';
         })) // {

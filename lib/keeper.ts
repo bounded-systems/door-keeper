@@ -18,13 +18,8 @@
  *   await push({ repo: "/work" });
  */
 
-// Bun.connect via the global (no `import … from "bun"`) so the package resolves
-// on JSR/Deno publish — the same way the guest-room protocol uses Bun globals.
-// (Full Deno/Bun-agnostic abstraction is tracked separately.)
-const connect = Bun.connect;
-
 import { heldGrant } from "./concierge.ts";
-import type { SignedGrant } from "../guest-room/mod.ts";
+import { call, DoorCallError } from "../guest-room/protocol.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -83,6 +78,27 @@ export type PushResult = {
   commits: string[];
 };
 
+/** Options for opening a GitHub PR via keeperd. */
+export type PrOptions = {
+  /** The GitHub repository as `owner/name` — the REST target, NOT a filesystem
+   *  path, so it is passed through verbatim (no /work translation). */
+  repo: string;
+  /** The head branch keeperd already pushed (via `push`/`import-and-push`). */
+  head: string;
+  /** The base branch to open the PR against (default: "main"). */
+  base?: string;
+  /** PR title. */
+  title: string;
+  /** PR body (optional). */
+  body?: string;
+};
+
+/** Result of opening a PR via keeperd: the created PR's number and URL. */
+export type PrResult = {
+  number: number;
+  url: string;
+};
+
 /** Result of a sign operation via keeperd. */
 export type SignResult = {
   signature: string;
@@ -116,113 +132,36 @@ export class KeeperError extends Error {
 
 // ── Client ───────────────────────────────────────────────────────────────────
 
-type KeeperTarget =
-  | { type: "unix"; path: string }
-  | { type: "tcp"; host: string; port: number };
-
-/** Get keeperd connection target from environment or default. */
-function getTarget(): KeeperTarget {
-  // TCP mode: KEEPERD_HOST=host:port (e.g., "host.containers.internal:9999")
+/** Get keeperd's connection endpoint — a unix path or a `host:port` TCP
+ *  target (either shape parses through call()'s connectTarget). */
+function keeperEndpoint(): string {
+  // Back-compat: KEEPERD_HOST=host:port is still honored if set explicitly
+  // (some dev docs/scripts do). claude-box itself only ever sets KEEPERD_SOCK,
+  // whose value may be a unix path OR a host:port TCP endpoint (TCP mode).
   const tcpHost = process.env.KEEPERD_HOST;
-  if (tcpHost) {
-    const [host, portStr] = tcpHost.split(":");
-    return { type: "tcp", host: host || "127.0.0.1", port: Number(portStr) || 9999 };
-  }
+  if (tcpHost) return tcpHost;
 
-  // Unix socket mode: KEEPERD_SOCK=/path/to/socket
   const sockPath = process.env.KEEPERD_SOCK;
-  if (sockPath) return { type: "unix", path: sockPath };
+  if (sockPath) return sockPath;
 
   // In-box default: socket at /run/keeperd.sock
-  if (Bun.file("/run/keeperd.sock").size !== undefined) {
-    return { type: "unix", path: "/run/keeperd.sock" };
-  }
+  if (Bun.file("/run/keeperd.sock").size !== undefined) return "/run/keeperd.sock";
 
   // Fallback for testing outside a box
   const runtime = process.env.XDG_RUNTIME_DIR;
-  if (runtime) return { type: "unix", path: `${runtime}/keeperd.sock` };
+  if (runtime) return `${runtime}/keeperd.sock`;
   const home = process.env.HOME ?? "/tmp";
-  return { type: "unix", path: `${home}/.claude-box/keeperd.sock` };
+  return `${home}/.claude-box/keeperd.sock`;
 }
-
-type RequestEnvelope = {
-  id: string;
-  method: string;
-  params?: Record<string, unknown>;
-  /** The signed grant this box holds for "keeper", presented so a tcp/vsock
-   *  keeperd can verify it (no-op on a unix door). */
-  grant?: SignedGrant;
-};
-
-type ResponseEnvelope = {
-  id: string;
-  ok: boolean;
-  result?: unknown;
-  error?: { code: string; message: string };
-};
 
 /** Send a request to keeperd and wait for response. */
 async function request<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-  const target = getTarget();
-  const id = crypto.randomUUID();
-
-  return new Promise((resolve, reject) => {
-    let buffer = "";
-    let resolved = false;
-
-    const socketHandler = {
-      open(sock: ReturnType<typeof connect> extends Promise<infer S> ? S : never) {
-        const grant = heldGrant("keeper"); // present it iff resolved (tcp/vsock gate)
-        const req: RequestEnvelope = { id, method, params, ...(grant ? { grant } : {}) };
-        sock.write(JSON.stringify(req) + "\n");
-      },
-      data(sock: ReturnType<typeof connect> extends Promise<infer S> ? S : never, data: Buffer) {
-        buffer += data.toString();
-        const newline = buffer.indexOf("\n");
-        if (newline >= 0 && !resolved) {
-          resolved = true;
-          const line = buffer.slice(0, newline);
-          sock.end();
-          try {
-            const resp = JSON.parse(line) as ResponseEnvelope;
-            if (resp.ok) {
-              resolve(resp.result as T);
-            } else {
-              reject(new KeeperError(
-                resp.error?.code ?? "UNKNOWN",
-                resp.error?.message ?? "keeperd error"
-              ));
-            }
-          } catch (e) {
-            reject(new KeeperError("PARSE_ERROR", "invalid response from keeperd"));
-          }
-        }
-      },
-      error(_sock: unknown, err: Error) {
-        if (!resolved) {
-          resolved = true;
-          reject(new KeeperError("CONNECTION_ERROR", `failed to connect to keeperd: ${err}`));
-        }
-      },
-      close() {
-        if (!resolved) {
-          resolved = true;
-          reject(new KeeperError("CONNECTION_CLOSED", "connection closed before response"));
-        }
-      },
-    };
-
-    const connectPromise = target.type === "unix"
-      ? connect({ unix: target.path, socket: socketHandler })
-      : connect({ hostname: target.host, port: target.port, socket: socketHandler });
-
-    connectPromise.catch((err) => {
-      if (!resolved) {
-        resolved = true;
-        reject(new KeeperError("CONNECTION_ERROR", `failed to connect to keeperd: ${err}`));
-      }
-    });
-  });
+  try {
+    return await call<T>(keeperEndpoint(), method, params, { grant: heldGrant("keeper") });
+  } catch (e) {
+    if (e instanceof DoorCallError) throw new KeeperError(e.code, e.message);
+    throw e;
+  }
 }
 
 // ── Path translation ──────────────────────────────────────────────────────────
@@ -289,6 +228,23 @@ export async function push(options: PushOptions): Promise<PushResult> {
   });
 }
 
+/**
+ * Open a GitHub PR via keeperd.
+ *
+ * Requires the `--keeper` door. The box holds **no** GitHub API token: keeperd
+ * leases a scoped, short-lived one from forge-d internally, opens the PR, and
+ * discards it. `repo` is a GitHub `owner/name` slug (not path-translated).
+ */
+export async function pr(options: PrOptions): Promise<PrResult> {
+  return request<PrResult>("pr", {
+    repo: options.repo,
+    head: options.head,
+    base: options.base ?? "main",
+    title: options.title,
+    ...(options.body !== undefined ? { body: options.body } : {}),
+  });
+}
+
 /** Options for import-and-push: the host builds commits locally (keyless) and keeperd signs the push. */
 export type ImportAndPushOptions = {
   /** The repo keeperd imports the bundle into and pushes from (the daemon-side
@@ -335,7 +291,6 @@ export async function importAndPush(
   options: ImportAndPushOptions,
 ): Promise<ImportAndPushResult> {
   return request<ImportAndPushResult>("import-and-push", {
-    kind: "import-and-push",
     repo: translateRepoPath(options.repo),
     bundleBase64: options.bundleBase64,
     commitSha: options.commitSha,
@@ -485,6 +440,16 @@ async function main(): Promise<number> {
       console.log(`commits: ${result.commits.join(", ") || "(none)"}`);
       return 0;
     }
+    case "pr": {
+      const [repo, head, base, title, body] = args;
+      if (!repo || !head || !base || !title) {
+        console.error("usage: keeper pr <repo> <head> <base> <title> [body]");
+        return 1;
+      }
+      const result = await pr({ repo, head, base, title, ...(body ? { body } : {}) });
+      console.log(`opened #${result.number}: ${result.url}`);
+      return 0;
+    }
     case "key": {
       const key = await getPublicKey();
       console.log(key.publicKey);
@@ -497,6 +462,8 @@ Usage:
   keeper status              show keeperd status
   keeper commit [REPO] [MSG] create a signed commit
   keeper push [REPO]         push to remote
+  keeper pr <repo> <head> <base> <title> [body]
+                             open a GitHub PR (repo = owner/name)
   keeper key                 show signing public key
 
 This command only works inside a box with the --keeper door.`);

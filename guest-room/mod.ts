@@ -71,6 +71,17 @@ export function transportString(t: DoorTransport): string {
   }
 }
 
+/** A `call()`-shaped endpoint string for a transport (unlike `transportString`,
+ *  which is for logs). `unix` → its path; `tcp` → `host:port` — both of which
+ *  `call()` parses. `vsock` has no `call()` connect path yet, so it throws. */
+export function transportToEndpoint(t: DoorTransport): string {
+  switch (t.kind) {
+    case "unix": return t.path;
+    case "tcp": return `${t.host}:${t.port}`;
+    case "vsock": throw new Error(`transportToEndpoint: vsock unsupported (cid ${t.cid} port ${t.port})`);
+  }
+}
+
 /** Environment variables (a map of names to values or undefined). */
 export type Env = Record<string, string | undefined>;
 
