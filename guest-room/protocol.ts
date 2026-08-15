@@ -36,19 +36,22 @@ interface ClientSocket {
   end(): void;
 }
 
+/** The socket-handler set `call` passes to Bun.connect (same for unix + tcp). */
+interface ConnectHandlers {
+  data(socket: ClientSocket, chunk: Uint8Array): void;
+  open(socket: ClientSocket): void;
+  error(socket: ClientSocket, error: Error): void;
+  close(socket: ClientSocket): void;
+}
+
 /** Bun's runtime global, declared locally with only the shape `call` needs (so
  *  the module type-checks without @types/bun). At runtime this is Bun's global,
- *  so `call` runs under the Bun runtime. */
+ *  so `call` runs under the Bun runtime. Both transports are declared: a unix
+ *  door (`{unix}`) and a tcp/vsock door (`{hostname,port}`). */
+type ConnectResult = Promise<{ catch(onrejected: (reason: unknown) => void): unknown }>;
 declare const Bun: {
-  connect(options: {
-    unix: string;
-    socket: {
-      data(socket: ClientSocket, chunk: Uint8Array): void;
-      open(socket: ClientSocket): void;
-      error(socket: ClientSocket, error: Error): void;
-      close(socket: ClientSocket): void;
-    };
-  }): Promise<{ catch(onrejected: (reason: unknown) => void): unknown }>;
+  connect(options: { unix: string; socket: ConnectHandlers }): ConnectResult;
+  connect(options: { hostname: string; port: number; socket: ConnectHandlers }): ConnectResult;
 };
 
 // ── Protocol types (shared across all doors) ────────────────────────────────
@@ -316,6 +319,22 @@ function connectTarget(endpoint: string): { unix: string } | { hostname: string;
 }
 
 /**
+ * A door RPC failure, carrying the machine-readable `code` the daemon
+ * returned (e.g. `INVALID_PARAMS`, `NOT_FOUND`) — or a transport-level code
+ * (`PARSE_ERROR`, `CONNECTION_ERROR`, `CONNECTION_CLOSED`) when the daemon
+ * never got to answer. Per-door clients pattern-match on `.code`; plain
+ * `Error` has no such field, so `call()` throws this instead.
+ */
+export class DoorCallError extends Error {
+  code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+    this.name = "DoorCallError";
+  }
+}
+
+/**
  * Send a request to a door daemon and wait for the response. The endpoint is a
  * unix socket path or a `host:port` TCP target (see {@link connectTarget}).
  *
@@ -335,45 +354,67 @@ export async function call<T = unknown>(
   endpoint: string,
   method: string,
   params: Record<string, unknown> = {},
-  opts: { auth?: string; sign?: (req: RequestEnvelope) => string } = {},
+  opts: { auth?: string; sign?: (req: RequestEnvelope) => string; grant?: SignedGrant } = {},
 ): Promise<T> {
   const id = crypto.randomUUID();
   const req: RequestEnvelope = { id, method, params };
   const auth = opts.sign ? opts.sign(req) : opts.auth;
   if (auth !== undefined) req.auth = auth;
+  // A signed grant the caller presents to a tcp/vsock serving room (no-op on a
+  // unix door, where the held reference is authority) — see RequestEnvelope.grant.
+  if (opts.grant !== undefined) req.grant = opts.grant;
 
   return new Promise((resolve, reject) => {
     let buffer = "";
-    const socket = Bun.connect({
-      ...connectTarget(endpoint),
-      socket: {
-        data(_socket, chunk) {
-          buffer += Buffer.from(chunk).toString("utf-8");
-          const idx = buffer.indexOf("\n");
-          if (idx !== -1) {
-            const line = buffer.slice(0, idx);
-            try {
-              const resp = JSON.parse(line) as ResponseEnvelope;
-              if (resp.ok) {
-                resolve(resp.result as T);
-              } else {
-                reject(new Error(resp.error?.message ?? "unknown error"));
-              }
-            } catch (e) {
-              reject(e);
+    let settled = false;
+    const handlers: ConnectHandlers = {
+      data(socket, chunk) {
+        buffer += Buffer.from(chunk).toString("utf-8");
+        const idx = buffer.indexOf("\n");
+        if (idx !== -1 && !settled) {
+          settled = true;
+          const line = buffer.slice(0, idx);
+          try {
+            const resp = JSON.parse(line) as ResponseEnvelope;
+            if (resp.ok) {
+              resolve(resp.result as T);
+            } else {
+              reject(new DoorCallError(resp.error?.code ?? "UNKNOWN", resp.error?.message ?? "unknown error"));
             }
-            _socket.end();
+          } catch {
+            reject(new DoorCallError("PARSE_ERROR", "invalid response from door"));
           }
-        },
-        open(socket) {
-          socket.write(JSON.stringify(req) + "\n");
-        },
-        error(_socket, error) {
-          reject(error);
-        },
-        close() {},
+          socket.end();
+        }
       },
+      open(socket) {
+        socket.write(JSON.stringify(req) + "\n");
+      },
+      error(_socket, error) {
+        if (!settled) {
+          settled = true;
+          reject(new DoorCallError("CONNECTION_ERROR", `failed to connect: ${error}`));
+        }
+      },
+      close() {
+        if (!settled) {
+          settled = true;
+          reject(new DoorCallError("CONNECTION_CLOSED", "connection closed before response"));
+        }
+      },
+    };
+    // Branch on the transport so each Bun.connect call matches a concrete
+    // overload (unix vs tcp); spreading the union would defeat overload selection.
+    const target = connectTarget(endpoint);
+    const conn =
+      "unix" in target
+        ? Bun.connect({ unix: target.unix, socket: handlers })
+        : Bun.connect({ hostname: target.hostname, port: target.port, socket: handlers });
+    conn.catch((e) => {
+      if (!settled) {
+        settled = true;
+        reject(new DoorCallError("CONNECTION_ERROR", `failed to connect: ${e}`));
+      }
     });
-    socket.catch(reject);
   });
 }

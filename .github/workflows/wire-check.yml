@@ -17,3 +17,5 @@ jobs:
       - uses: DeterminateSystems/flakehub-cache-action@4d48cd3cda2f381a3006ff800e1c1ca0c9809159 # v3.21.1
       - name: keeperd METHODS conform to keeper-wire
         run: nix build --print-build-logs '.#checks.x86_64-linux.keeper-wire-methods'
+      - name: vendored door-kit client matches the pinned input
+        run: nix build --print-build-logs '.#checks.x86_64-linux.door-kit-mirror'
